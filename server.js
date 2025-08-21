@@ -14,7 +14,7 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production' 
-      ? ["https://*.vercel.app", "https://*.vercel.com"]
+      ? ["https://*.railway.app", "https://*.up.railway.app"]
       : "*",
     methods: ["GET", "POST"],
     credentials: true
@@ -25,7 +25,7 @@ const io = socketIo(server, {
 // Middleware
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ["https://*.vercel.app", "https://*.vercel.com"]
+    ? ["https://*.railway.app", "https://*.up.railway.app"]
     : "*",
   credentials: true
 }));
@@ -155,12 +155,10 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Solo iniciar servidor en desarrollo local
-if (process.env.NODE_ENV !== 'production') {
-  server.listen(PORT, () => {
-    console.log(`🎵 Servidor ejecutándose en http://localhost:${PORT}`);
-  });
-}
+// Iniciar servidor (Railway necesita esto en producción)
+server.listen(PORT, () => {
+  console.log(`🎵 Servidor ejecutándose en puerto ${PORT}`);
+});
 
-// Exportar para Vercel
+// Exportar para compatibilidad con Vercel (opcional)
 module.exports = app;
