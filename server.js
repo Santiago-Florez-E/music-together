@@ -1,41 +1,36 @@
 const express = require('express');
-const https = require('https');
 const http = require('http');
-const fs = require('fs');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Configuración HTTPS
-const httpsOptions = {
-  key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
-  cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem'))
-};
+// Crear servidor HTTP (Vercel maneja HTTPS automáticamente)
+const server = http.createServer(app);
 
-const httpsServer = https.createServer(httpsOptions, app);
-const httpServer = http.createServer(app);
-
-const io = socketIo(httpsServer, {
+// Configurar Socket.io
+const io = socketIo(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    origin: process.env.NODE_ENV === 'production' 
+      ? ["https://*.vercel.app", "https://*.vercel.com"]
+      : "*",
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  transports: ['websocket', 'polling']
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ["https://*.vercel.app", "https://*.vercel.com"]
+    : "*",
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
-// Redirección HTTP a HTTPS
-httpServer.on('request', (req, res) => {
-  const host = req.headers.host;
-  const httpsUrl = `https://${host.replace(':3000', ':3443')}${req.url}`;
-  res.writeHead(301, { Location: httpsUrl });
-  res.end();
-});
 
 // Estado global de la aplicación
 let playlist = [];
@@ -155,34 +150,17 @@ io.on('connection', (socket) => {
   });
 });
 
-// Obtener IP local
-function getLocalIP() {
-  const { networkInterfaces } = require('os');
-  const nets = networkInterfaces();
-  
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return net.address;
-      }
-    }
-  }
-  return 'localhost';
+// Ruta principal para servir el frontend
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Solo iniciar servidor en desarrollo local
+if (process.env.NODE_ENV !== 'production') {
+  server.listen(PORT, () => {
+    console.log(`🎵 Servidor ejecutándose en http://localhost:${PORT}`);
+  });
 }
 
-const HTTP_PORT = 3000;
-const HTTPS_PORT = 3443;
-const localIP = getLocalIP();
-
-// Iniciar servidores
-httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
-  console.log(`🔄 Servidor HTTP (redirección) en puerto ${HTTP_PORT}`);
-});
-
-httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
-  console.log(`🎵 Servidor HTTPS ejecutándose en:`);
-  console.log(`   Local: https://localhost:${HTTPS_PORT}`);
-  console.log(`   Red:   https://${localIP}:${HTTPS_PORT}`);
-  console.log(`\n📱 Otros dispositivos pueden conectarse usando: https://${localIP}:${HTTPS_PORT}`);
-  console.log(`\n⚠️  Acepta el certificado de seguridad en cada dispositivo`);
-});
+// Exportar para Vercel
+module.exports = app;
