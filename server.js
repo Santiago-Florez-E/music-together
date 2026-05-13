@@ -354,22 +354,77 @@ app.get('/api/history', (req, res) => {
 
 app.get('/api/search', async (req, res) => {
   try {
-    const q = (req.query.q || '').toString().trim();
+    const raw = (req.query.q || '').toString();
+    const q = raw.replace(/\s+/g, ' ').trim();
     if (!q) return res.json([]);
 
     const count = Math.min(25, Math.max(1, parseInt(req.query.count) || 12));
-    const results = await YouTube.search(q, { limit: count, type: 'video' }).catch(() => []);
 
-    const mapped = (Array.isArray(results) ? results : [])
-      .filter((v) => v?.id && v?.title)
-      .map((v) => ({
-        id: v.id,
-        title: v.title,
-        channel: v.channel?.name || 'YouTube',
-        thumbnail: normalizeThumb(v.thumbnail, v.id)
-      }));
+    const directVideoId = YouTube.validate(q, 'VIDEO_ID') ? q : extractYouTubeId(q);
+    if (directVideoId) {
+      const info = await getVideoInfo(directVideoId);
+      return res.json([
+        {
+          id: directVideoId,
+          title: info.title,
+          channel: 'YouTube',
+          thumbnail: info.thumbnail
+        }
+      ]);
+    }
 
-    res.json(mapped);
+    const byId = new Map();
+    const tried = new Set();
+
+    const pushVideos = (items) => {
+      const list = Array.isArray(items) ? items : [];
+      for (const v of list) {
+        const id = v?.id;
+        const title = v?.title;
+        if (!id || !title) continue;
+        if (byId.has(id)) continue;
+        byId.set(id, {
+          id,
+          title,
+          channel: v.channel?.name || 'YouTube',
+          thumbnail: normalizeThumb(v.thumbnail, id)
+        });
+      }
+    };
+
+    const doSearch = async (query) => {
+      const queryNorm = (query || '').toString().replace(/\s+/g, ' ').trim();
+      if (!queryNorm) return;
+      if (tried.has(queryNorm.toLowerCase())) return;
+      tried.add(queryNorm.toLowerCase());
+
+      const limit = Math.max(count * 2, 20);
+      const results = await YouTube.search(queryNorm, { limit, type: 'video' }).catch(() => []);
+      pushVideos(results);
+    };
+
+    await doSearch(q);
+
+    if (byId.size < count) {
+      const suggestions = await YouTube.getSuggestions(q).catch(() => []);
+      const uniqueSuggestions = Array.from(new Set((Array.isArray(suggestions) ? suggestions : []).map((s) => (s || '').toString().trim()).filter(Boolean)));
+      for (const s of uniqueSuggestions.slice(0, 6)) {
+        await doSearch(s);
+        if (byId.size >= count) break;
+      }
+    }
+
+    if (byId.size < count) {
+      await doSearch(`${q} music`);
+      await doSearch(`${q} soundtrack`);
+    }
+
+    if (byId.size < count) {
+      const trending = await YouTube.trending({ type: 'MUSIC' }).catch(() => []);
+      pushVideos(trending);
+    }
+
+    res.json(Array.from(byId.values()).slice(0, count));
   } catch (error) {
     console.error('Error searching:', error);
     res.json([]);
