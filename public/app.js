@@ -24,6 +24,11 @@ class MusicTogether {
         this.setupSocketListeners();
         this.fetchRecommendations();
     }
+
+    getAvatarUrl(userName) {
+        const seed = encodeURIComponent(userName || 'Anónimo');
+        return `https://api.dicebear.com/7.x/pixel-art/svg?seed=${seed}`;
+    }
     
     initializeElements() {
         this.userNameInput = document.getElementById('userName');
@@ -186,7 +191,11 @@ class MusicTogether {
                 <div class="song-info">
                     <div class="song-title" title="${song.title}">${song.title}</div>
                     <div class="song-meta">
-                        Por: ${song.userName} • ${new Date(song.addedAt).toLocaleTimeString()}
+                        <div class="user-tag">
+                            <img src="${this.getAvatarUrl(song.userName)}" class="avatar" alt="Avatar">
+                            <span>Por: <b>${song.userName}</b></span>
+                        </div>
+                        • ${new Date(song.addedAt).toLocaleTimeString()}
                     </div>
                 </div>
                 <button class="remove-btn" onclick="app.removeSong('${song.id}')" title="Eliminar de la cola">
@@ -200,8 +209,11 @@ class MusicTogether {
         if (this.currentSong) {
             this.currentSongInfo.innerHTML = `
                 <div style="color: var(--accent); font-size: 0.8rem; text-transform: uppercase; font-weight: 700; margin-bottom: 4px;">En vivo ahora</div>
-                <div style="font-size: 1.1rem;">${this.currentSong.title}</div>
-                <div style="color: var(--text-muted); font-size: 0.85rem;">Sugerida por: ${this.currentSong.userName}</div>
+                <div style="font-size: 1.1rem; margin-bottom: 8px;">${this.currentSong.title}</div>
+                <div class="user-tag">
+                    <img src="${this.getAvatarUrl(this.currentSong.userName)}" class="avatar" alt="Avatar">
+                    <span style="color: var(--text-muted); font-size: 0.85rem;">Sugerida por: <b>${this.currentSong.userName}</b></span>
+                </div>
             `;
             this.nextSongBtn.style.display = 'inline-block';
         } else {
@@ -320,7 +332,10 @@ class MusicTogether {
             return `
                 <div class="chat-message">
                     <div class="chat-meta">
-                        <span>${safeUser}</span>
+                        <div class="user-tag">
+                            <img src="${this.getAvatarUrl(user)}" class="avatar avatar-sm" alt="Avatar">
+                            <span>${safeUser}</span>
+                        </div>
                         <span>${when}</span>
                     </div>
                     <div class="chat-text">${safeText}</div>
@@ -380,7 +395,13 @@ class MusicTogether {
                 <img src="${h.thumbnail}" alt="Thumbnail" class="history-thumbnail">
                 <div class="history-info">
                     <div class="history-title" title="${h.title}">${h.title}</div>
-                    <div class="history-meta">${h.userName || 'Anónimo'} • ${new Date(h.playedAt).toLocaleString()}</div>
+                    <div class="history-meta">
+                        <div class="user-tag">
+                            <img src="${this.getAvatarUrl(h.userName)}" class="avatar avatar-sm" alt="Avatar">
+                            <span>${h.userName || 'Anónimo'}</span>
+                        </div>
+                        • ${new Date(h.playedAt).toLocaleString()}
+                    </div>
                 </div>
                 <button class="history-add-btn" onclick="app.addFromRecommendation('${h.videoId}')">Añadir</button>
             </div>
