@@ -9,6 +9,8 @@ class MusicTogether {
         
         this.isPlaying = false;
         this.recommendations = [];
+        this.lastSuggestionsSeed = null;
+        this.suggestionsRefreshTimer = null;
 
         this.initializeElements();
         this.setupEventListeners();
@@ -59,16 +61,38 @@ class MusicTogether {
         
         this.socket.on('song-changed', (data) => {
             this.updateState(data);
-            if (data.currentSong && this.isPlayerReady) {
-                this.loadVideo(data.currentSong.id);
+            const vid = data.currentSong?.videoId || data.currentSong?.id;
+            if (vid && this.isPlayerReady) {
+                this.loadVideo(vid);
             }
+        });
+
+        this.socket.on('suggestions-updated', (data) => {
+            if (this.suggestionsRefreshTimer) {
+                clearTimeout(this.suggestionsRefreshTimer);
+                this.suggestionsRefreshTimer = null;
+            }
+
+            const items = Array.isArray(data) ? data : (data?.items || []);
+            if (!Array.isArray(items)) return;
+
+            this.recommendations = items;
+            this.renderRecommendations();
         });
     }
     
     updateState(data) {
+        const prevVid = this.getCurrentVideoId(this.currentSong);
+
         this.currentSong = data.currentSong;
         this.playlist = data.playlist || [];
         this.isPlaying = data.isPlaying;
+
+        const nextVid = this.getCurrentVideoId(this.currentSong);
+        if (nextVid && nextVid !== prevVid && nextVid !== this.lastSuggestionsSeed) {
+            this.lastSuggestionsSeed = nextVid;
+            this.scheduleRecommendationsRefresh();
+        }
         
         this.updatePlaylist();
         this.updateCurrentSongInfo();
@@ -110,6 +134,18 @@ class MusicTogether {
             this.currentSongInfo.innerHTML = '<span id="no-song">No hay canciones en reproducción</span>';
             this.nextSongBtn.style.display = 'none';
         }
+    }
+
+    getCurrentVideoId(song) {
+        return song?.videoId || song?.id || null;
+    }
+
+    scheduleRecommendationsRefresh() {
+        if (this.suggestionsRefreshTimer) clearTimeout(this.suggestionsRefreshTimer);
+        this.suggestionsRefreshTimer = setTimeout(() => {
+            this.suggestionsRefreshTimer = null;
+            this.fetchRecommendations();
+        }, 600);
     }
 
     async fetchRecommendations() {
@@ -236,8 +272,9 @@ class MusicTogether {
             events: {
                 'onReady': () => {
                     this.isPlayerReady = true;
-                    if (this.currentSong) {
-                        this.loadVideo(this.currentSong.id);
+                    const vid = this.currentSong?.videoId || this.currentSong?.id;
+                    if (vid) {
+                        this.loadVideo(vid);
                     }
                 },
                 'onStateChange': (event) => {

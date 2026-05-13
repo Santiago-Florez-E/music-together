@@ -40,6 +40,147 @@ let isPlaying = false;
 let currentTime = 0;
 let playStartTime = null;
 
+let autoplayHistory = [];
+const AUTOPLAY_HISTORY_MAX = 30;
+
+let lastSuggestionsSeed = null;
+let lastSuggestions = [];
+let lastSuggestionsAt = 0;
+
+function normalizeThumb(thumbnail, fallbackVideoId) {
+  const url = thumbnail?.url || thumbnail?.toJSON?.().url;
+  return url || `https://img.youtube.com/vi/${fallbackVideoId}/mqdefault.jpg`;
+}
+
+function rememberAutoplay(videoId) {
+  if (!videoId) return;
+  autoplayHistory = [videoId, ...autoplayHistory.filter((id) => id !== videoId)].slice(0, AUTOPLAY_HISTORY_MAX);
+}
+
+function getSongVideoId(song) {
+  return song?.videoId || song?.id || null;
+}
+
+function getBlockedVideoIds(seedVideoId) {
+  const blocked = new Set(autoplayHistory);
+
+  const currentVideoId = getSongVideoId(currentSong);
+  if (currentVideoId) blocked.add(currentVideoId);
+
+  for (const s of playlist) {
+    const vid = getSongVideoId(s);
+    if (vid) blocked.add(vid);
+  }
+
+  if (seedVideoId) blocked.add(seedVideoId);
+
+  return blocked;
+}
+
+async function getYouTubeMixVideos(seedVideoId, limit) {
+  if (!seedVideoId) return [];
+  const mixUrl = `https://www.youtube.com/watch?v=${seedVideoId}&list=RD${seedVideoId}`;
+  const mix = await YouTube.getPlaylist(mixUrl, { limit: Math.max(limit, 25) }).catch(() => null);
+  const videos = mix?.videos;
+  return Array.isArray(videos) ? videos : [];
+}
+
+async function getAutoplayCandidate(seedVideoId) {
+  const blocked = getBlockedVideoIds(seedVideoId);
+
+  if (seedVideoId) {
+    const mixVideos = await getYouTubeMixVideos(seedVideoId, 25);
+    const nextFromMix = mixVideos.find((v) => v?.id && !blocked.has(v.id));
+    if (nextFromMix) return nextFromMix;
+  }
+
+  const trending = await YouTube.trending({ type: 'MUSIC' }).catch(() => []);
+  if (Array.isArray(trending) && trending.length) {
+    const unseen = trending.find((v) => v?.id && !blocked.has(v.id));
+    return unseen || trending.find((v) => v?.id) || null;
+  }
+
+  const fallbackSearch = await YouTube.search('musica popular mix', { limit: 10, type: 'video' }).catch(() => []);
+  if (Array.isArray(fallbackSearch) && fallbackSearch.length) {
+    const unseen = fallbackSearch.find((v) => v?.id && !blocked.has(v.id));
+    return unseen || fallbackSearch.find((v) => v?.id) || null;
+  }
+
+  return null;
+}
+
+function shuffleInPlace(items) {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = items[i];
+    items[i] = items[j];
+    items[j] = tmp;
+  }
+  return items;
+}
+
+async function computeSuggestions(seedVideoId, count) {
+  const blocked = getBlockedVideoIds(seedVideoId);
+
+  let candidates = [];
+  if (seedVideoId) {
+    const fromMix = await getYouTubeMixVideos(seedVideoId, Math.max(count * 10, 60));
+    candidates = candidates.concat(fromMix);
+  }
+
+  const trending = await YouTube.trending({ type: 'MUSIC' }).catch(() => []);
+  if (Array.isArray(trending) && trending.length) {
+    candidates = candidates.concat(trending);
+  }
+
+  const byId = new Map();
+  for (const v of candidates) {
+    if (!v?.id || !v?.title) continue;
+    if (blocked.has(v.id)) continue;
+    if (!byId.has(v.id)) {
+      byId.set(v.id, {
+        id: v.id,
+        title: v.title,
+        channel: v.channel?.name || 'YouTube',
+        thumbnail: normalizeThumb(v.thumbnail, v.id)
+      });
+    }
+  }
+
+  const unique = Array.from(byId.values());
+  shuffleInPlace(unique);
+
+  const results = [];
+  const start = unique.length ? Math.floor(Date.now() / 15000) % unique.length : 0;
+  for (let i = 0; i < unique.length && results.length < count; i++) {
+    results.push(unique[(start + i) % unique.length]);
+  }
+
+  return results;
+}
+
+async function emitSuggestionsToSocket(socket, count = 6) {
+  const seedVideoId = getSongVideoId(currentSong);
+  const items = await computeSuggestions(seedVideoId, count);
+
+  lastSuggestionsSeed = seedVideoId;
+  lastSuggestions = items;
+  lastSuggestionsAt = Date.now();
+
+  socket.emit('suggestions-updated', { seedVideoId, items });
+}
+
+async function broadcastSuggestions(count = 6) {
+  const seedVideoId = getSongVideoId(currentSong);
+  const items = await computeSuggestions(seedVideoId, count);
+
+  lastSuggestionsSeed = seedVideoId;
+  lastSuggestions = items;
+  lastSuggestionsAt = Date.now();
+
+  io.emit('suggestions-updated', { seedVideoId, items });
+}
+
 // Función para extraer ID de video de YouTube
 function extractYouTubeId(url) {
   const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
@@ -52,15 +193,15 @@ async function getVideoInfo(videoId) {
   try {
     const video = await YouTube.getVideo(`https://www.youtube.com/watch?v=${videoId}`);
     return {
-      id: videoId,
+      videoId,
       title: video.title || `Video ${videoId}`,
-      thumbnail: video.thumbnail.url || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+      thumbnail: normalizeThumb(video.thumbnail, videoId),
       addedAt: new Date().toISOString()
     };
   } catch (error) {
     console.error('Error fetching video info:', error);
     return {
-      id: videoId,
+      videoId,
       title: `Video ${videoId}`,
       thumbnail: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
       addedAt: new Date().toISOString()
@@ -81,37 +222,12 @@ app.get('/api/playlist', (req, res) => {
 app.get('/api/suggestions', async (req, res) => {
   try {
     const count = parseInt(req.query.count) || 6;
-    let results = [];
-
-    if (currentSong && !currentSong.id.startsWith('auto-')) {
-      // Si hay una canción sonando, buscar relacionadas
-      results = await YouTube.getSuggestions(currentSong.title); 
-      // Nota: getSuggestions es para autocompletado de texto. 
-      // Para videos relacionados reales usaremos search con el título.
-      const searchResults = await YouTube.search(currentSong.title, { limit: count + 2, type: 'video' });
-      results = searchResults
-        .filter(v => v.id !== currentSong.id)
-        .slice(0, count)
-        .map(v => ({
-          id: v.id,
-          title: v.title,
-          channel: v.channel?.name || 'YouTube',
-          thumbnail: v.thumbnail?.url
-        }));
-    } else {
-      // Si no hay nada, buscar tendencias de música
-      const searchResults = await YouTube.search('tendencias musica 2024', { limit: count, type: 'video' });
-      results = searchResults.map(v => ({
-        id: v.id,
-        title: v.title,
-        channel: v.channel?.name || 'YouTube',
-        thumbnail: v.thumbnail?.url
-      }));
-    }
+    const seedVideoId = getSongVideoId(currentSong);
+    const results = await computeSuggestions(seedVideoId, count);
     res.json(results);
   } catch (error) {
     console.error('Error fetching suggestions:', error);
-    res.json([]); // Fallback a lista vacía o podrías usar el pool anterior
+    res.json([]);
   }
 });
 
@@ -130,16 +246,15 @@ app.post('/api/add-song', async (req, res) => {
   const videoInfo = await getVideoInfo(videoId);
   const song = {
     ...videoInfo,
-    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // ID único
+    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // ID único (para la cola)
     userName: userName || 'Anónimo',
     addedAt: new Date().toISOString()
   };
   
   playlist.push(song);
-  
-  // Si no hay canción actual, empezar a reproducir
-  if (!currentSong || currentSong.id.startsWith('auto-')) {
-    playNextSong();
+
+  if (!currentSong) {
+    await playNextSong();
   }
   
   // Notificar a todos los clientes
@@ -182,20 +297,41 @@ app.post('/api/remove-song', (req, res) => {
 async function playNextSong() {
   if (playlist.length === 0) {
     try {
-      // Buscar algo relacionado a la última canción para el autoplay
-      const searchTerm = currentSong ? currentSong.title : 'musica popular mix';
-      const searchResults = await YouTube.search(searchTerm, { limit: 5, type: 'video' });
-      const nextAuto = searchResults[Math.floor(Math.random() * searchResults.length)];
+      const seedVideoId = getSongVideoId(currentSong);
 
-      currentSong = {
-        id: nextAuto.id,
-        title: nextAuto.title,
-        thumbnail: nextAuto.thumbnail.url,
-        userName: 'Autoplay',
-        addedAt: new Date().toISOString()
-      };
+      let suggestionFirst = null;
+      const cacheFresh = lastSuggestionsAt && Date.now() - lastSuggestionsAt < 60_000;
+      if (cacheFresh && lastSuggestionsSeed === seedVideoId && Array.isArray(lastSuggestions) && lastSuggestions.length) {
+        suggestionFirst = lastSuggestions[0];
+      } else {
+        const computed = await computeSuggestions(seedVideoId, 6).catch(() => []);
+        if (Array.isArray(computed) && computed.length) {
+          suggestionFirst = computed[0];
+          lastSuggestionsSeed = seedVideoId;
+          lastSuggestions = computed;
+          lastSuggestionsAt = Date.now();
+        }
+      }
+
+      const nextAuto = suggestionFirst?.id
+        ? { id: suggestionFirst.id, title: suggestionFirst.title, thumbnail: { url: suggestionFirst.thumbnail } }
+        : await getAutoplayCandidate(seedVideoId);
+
+      if (nextAuto?.id) {
+        currentSong = {
+          id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          videoId: nextAuto.id,
+          title: nextAuto.title,
+          thumbnail: normalizeThumb(nextAuto.thumbnail, nextAuto.id),
+          userName: 'Autoplay',
+          addedAt: new Date().toISOString()
+        };
+        rememberAutoplay(nextAuto.id);
+      } else {
+        currentSong = null;
+      }
     } catch (error) {
-      currentSong = null; // Fallback
+      currentSong = null;
     }
     isPlaying = !!currentSong;
     currentTime = 0;
@@ -213,6 +349,8 @@ async function playNextSong() {
     currentTime,
     playlist
   });
+
+  broadcastSuggestions().catch(() => {});
 }
 
 // Socket.io eventos
@@ -226,6 +364,8 @@ io.on('connection', (socket) => {
     isPlaying,
     currentTime: isPlaying ? currentTime + (Date.now() - playStartTime) / 1000 : currentTime
   });
+
+  emitSuggestionsToSocket(socket).catch(() => {});
   
   socket.on('song-ended', () => {
     playNextSong();
