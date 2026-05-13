@@ -51,6 +51,9 @@ const SUGGESTIONS_TTL_MS = 20000;
 const suggestionsCache = new Map();
 const suggestionsInflight = new Map();
 
+let playHistory = [];
+const PLAY_HISTORY_MAX = 50;
+
 function normalizeThumb(thumbnail, fallbackVideoId) {
   const url = thumbnail?.url || thumbnail?.toJSON?.().url;
   return url || `https://img.youtube.com/vi/${fallbackVideoId}/mqdefault.jpg`;
@@ -63,6 +66,33 @@ function rememberAutoplay(videoId) {
 
 function getSongVideoId(song) {
   return song?.videoId || song?.id || null;
+}
+
+function addToPlayHistory(song) {
+  const videoId = getSongVideoId(song);
+  if (!videoId) return;
+
+  const title = song?.title;
+  if (!title) return;
+
+  const entry = {
+    videoId,
+    title,
+    channel: song?.channel || 'YouTube',
+    thumbnail: song?.thumbnail || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+    userName: song?.userName || 'Anónimo',
+    playedAt: new Date().toISOString()
+  };
+
+  playHistory = [entry, ...playHistory.filter((e) => e.videoId !== videoId)].slice(0, PLAY_HISTORY_MAX);
+}
+
+async function emitHistoryToSocket(socket) {
+  socket.emit('history-updated', { items: playHistory });
+}
+
+async function broadcastHistory() {
+  io.emit('history-updated', { items: playHistory });
 }
 
 function getBlockedVideoIds(seedVideoId) {
@@ -317,6 +347,11 @@ app.get('/api/suggestions', async (req, res) => {
   }
 });
 
+app.get('/api/history', (req, res) => {
+  const count = Math.min(50, Math.max(1, parseInt(req.query.count) || 50));
+  res.json(playHistory.slice(0, count));
+});
+
 app.get('/api/search', async (req, res) => {
   try {
     const q = (req.query.q || '').toString().trim();
@@ -451,6 +486,11 @@ app.post('/api/remove-song', (req, res) => {
 });
 
 async function playNextSong() {
+  if (currentSong) {
+    addToPlayHistory(currentSong);
+    broadcastHistory().catch(() => {});
+  }
+
   if (playlist.length === 0) {
     try {
       const seedVideoId = getSongVideoId(currentSong);
@@ -518,13 +558,29 @@ io.on('connection', (socket) => {
     playlist,
     currentSong,
     isPlaying,
-    currentTime: isPlaying ? currentTime + (Date.now() - playStartTime) / 1000 : currentTime
+    currentTime: isPlaying ? currentTime + (Date.now() - playStartTime) / 1000 : currentTime,
+    history: playHistory
   });
 
   emitSuggestionsToSocket(socket).catch(() => {});
+  emitHistoryToSocket(socket).catch(() => {});
   
   socket.on('song-ended', () => {
     playNextSong();
+  });
+
+  socket.on('screen-message', (payload) => {
+    const text = (payload?.text || '').toString().trim();
+    const userName = (payload?.userName || 'Anónimo').toString().trim().slice(0, 20) || 'Anónimo';
+
+    if (!text) return;
+    if (text.length > 140) return;
+
+    io.emit('screen-message', {
+      text,
+      userName,
+      createdAt: Date.now()
+    });
   });
   
   socket.on('disconnect', () => {

@@ -28,11 +28,22 @@
                 Siguiente →
               </button>
             </div>
+
+            <div class="message-bar">
+              <input
+                type="text"
+                id="screenMessage"
+                placeholder="Escribe un mensaje para la pantalla..."
+                maxlength="140"
+              />
+              <button id="sendMessageBtn">Enviar</button>
+            </div>
           </section>
 
           <div class="tabs">
             <button class="tab-btn active" id="tabQueueBtn" data-tab="queue">Cola</button>
             <button class="tab-btn" id="tabSearchBtn" data-tab="search">Buscar</button>
+            <button class="tab-btn" id="tabHistoryBtn" data-tab="history">Historial</button>
           </div>
 
           <div class="tab-panel" id="tab-queue">
@@ -78,6 +89,15 @@
               </div>
               <div id="searchResults" class="search-results">
                 <p class="empty-search">Escribe algo y pulsa Buscar</p>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel hidden" id="tab-history">
+            <section class="card history-section">
+              <h3 style="margin-bottom: 1rem">Historial (últimas 50)</h3>
+              <div id="historyList" class="history-results">
+                <p class="empty-search">Aún no hay historial</p>
               </div>
             </section>
           </div>

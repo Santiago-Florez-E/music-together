@@ -15,6 +15,8 @@ class MusicTogether {
 
         this.activeTab = 'queue';
         this.searchResults = [];
+        this.history = [];
+        this.activeScreenMessages = [];
 
         this.initializeElements();
         this.setupEventListeners();
@@ -38,10 +40,17 @@ class MusicTogether {
         this.tabSearchBtn = document.getElementById('tabSearchBtn');
         this.tabQueuePanel = document.getElementById('tab-queue');
         this.tabSearchPanel = document.getElementById('tab-search');
+        this.tabHistoryBtn = document.getElementById('tabHistoryBtn');
+        this.tabHistoryPanel = document.getElementById('tab-history');
+        this.historyListDiv = document.getElementById('historyList');
 
         this.searchQueryInput = document.getElementById('searchQuery');
         this.searchBtn = document.getElementById('searchBtn');
         this.searchResultsDiv = document.getElementById('searchResults');
+
+        this.screenMessageInput = document.getElementById('screenMessage');
+        this.sendMessageBtn = document.getElementById('sendMessageBtn');
+        this.playerContainer = document.getElementById('player-container');
     }
     
     setupEventListeners() {
@@ -54,10 +63,16 @@ class MusicTogether {
 
         this.tabQueueBtn?.addEventListener('click', () => this.switchTab('queue'));
         this.tabSearchBtn?.addEventListener('click', () => this.switchTab('search'));
+        this.tabHistoryBtn?.addEventListener('click', () => this.switchTab('history'));
 
         this.searchBtn?.addEventListener('click', () => this.searchYouTube());
         this.searchQueryInput?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.searchYouTube();
+        });
+
+        this.sendMessageBtn?.addEventListener('click', () => this.sendScreenMessage());
+        this.screenMessageInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.sendScreenMessage();
         });
     }
     
@@ -74,6 +89,10 @@ class MusicTogether {
         
         this.socket.on('initial-state', (data) => {
             this.updateState(data);
+            if (Array.isArray(data?.history)) {
+                this.history = data.history;
+                this.renderHistory();
+            }
         });
         
         this.socket.on('playlist-updated', (data) => {
@@ -102,6 +121,21 @@ class MusicTogether {
 
             this.recommendations = items;
             this.renderRecommendations();
+        });
+
+        this.socket.on('history-updated', (data) => {
+            const payload = Array.isArray(data) ? { items: data } : data;
+            const items = payload?.items || [];
+            if (!Array.isArray(items)) return;
+            this.history = items;
+            this.renderHistory();
+        });
+
+        this.socket.on('screen-message', (data) => {
+            const text = (data?.text || '').toString();
+            const userName = (data?.userName || 'Anónimo').toString();
+            if (!text) return;
+            this.renderScreenMessage({ text, userName });
         });
     }
     
@@ -206,13 +240,87 @@ class MusicTogether {
 
         if (this.tabQueueBtn) this.tabQueueBtn.classList.toggle('active', tab === 'queue');
         if (this.tabSearchBtn) this.tabSearchBtn.classList.toggle('active', tab === 'search');
+        if (this.tabHistoryBtn) this.tabHistoryBtn.classList.toggle('active', tab === 'history');
 
         if (this.tabQueuePanel) this.tabQueuePanel.classList.toggle('hidden', tab !== 'queue');
         if (this.tabSearchPanel) this.tabSearchPanel.classList.toggle('hidden', tab !== 'search');
+        if (this.tabHistoryPanel) this.tabHistoryPanel.classList.toggle('hidden', tab !== 'history');
 
         if (tab === 'search' && (!this.searchResults || this.searchResults.length === 0)) {
             this.searchResultsDiv.innerHTML = '<p class="empty-search">Escribe algo y pulsa Buscar</p>';
         }
+
+        if (tab === 'history' && (!this.history || this.history.length === 0)) {
+            this.fetchHistory();
+        }
+    }
+
+    sendScreenMessage() {
+        const text = this.screenMessageInput?.value?.trim() || '';
+        if (!text) return;
+
+        const userName = this.userNameInput?.value?.trim() || 'Anónimo';
+
+        this.socket.emit('screen-message', {
+            text: text.slice(0, 140),
+            userName: userName.slice(0, 20)
+        });
+
+        if (this.screenMessageInput) this.screenMessageInput.value = '';
+    }
+
+    renderScreenMessage({ text, userName }) {
+        if (!this.playerContainer) return;
+
+        const el = document.createElement('div');
+        el.className = 'screen-msg';
+        el.textContent = `${userName}: ${text}`;
+
+        const containerHeight = this.playerContainer.clientHeight || 0;
+        const top = Math.max(8, Math.floor(Math.random() * Math.max(1, containerHeight - 40)));
+        el.style.top = `${top}px`;
+        el.style.animationDuration = '30s';
+
+        this.playerContainer.appendChild(el);
+
+        const remove = () => {
+            el.removeEventListener('animationend', remove);
+            if (el.parentNode) el.remove();
+        };
+
+        el.addEventListener('animationend', remove);
+        setTimeout(remove, 30000);
+    }
+
+    async fetchHistory() {
+        try {
+            const response = await fetch('/api/history?count=50');
+            const items = await response.json();
+            this.history = Array.isArray(items) ? items : [];
+            this.renderHistory();
+        } catch (error) {
+            this.renderHistory();
+        }
+    }
+
+    renderHistory() {
+        if (!this.historyListDiv) return;
+
+        if (!this.history || this.history.length === 0) {
+            this.historyListDiv.innerHTML = '<p class="empty-search">Aún no hay historial</p>';
+            return;
+        }
+
+        this.historyListDiv.innerHTML = this.history.map((h) => `
+            <div class="history-item">
+                <img src="${h.thumbnail}" alt="Thumbnail" class="history-thumbnail">
+                <div class="history-info">
+                    <div class="history-title" title="${h.title}">${h.title}</div>
+                    <div class="history-meta">${h.userName || 'Anónimo'} • ${new Date(h.playedAt).toLocaleString()}</div>
+                </div>
+                <button class="history-add-btn" onclick="app.addFromRecommendation('${h.videoId}')">Añadir</button>
+            </div>
+        `).join('');
     }
 
     async searchYouTube() {
