@@ -273,7 +273,12 @@ class MusicTogether {
             
             if (result.success) {
                 if (!urlValue) this.urlInput.value = '';
-                this.showMessage('¡Canción añadida!', 'success');
+                const n = Number(result.addedCount || 0);
+                if (n > 1) {
+                    this.showMessage(`¡Playlist añadida! (${n} canciones)`, 'success');
+                } else {
+                    this.showMessage('¡Canción añadida!', 'success');
+                }
             } else {
                 this.showMessage(result.error || 'Error al añadir', 'error');
             }

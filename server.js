@@ -257,6 +257,22 @@ function extractYouTubeId(url) {
   return match ? match[1] : null;
 }
 
+function normalizeUrl(input) {
+  const raw = (input || '').toString().trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+function extractPlaylistId(input) {
+  try {
+    const u = new URL(normalizeUrl(input));
+    return u.searchParams.get('list');
+  } catch {
+    return null;
+  }
+}
+
 // Función para obtener información real del video
 async function getVideoInfo(videoId) {
   try {
@@ -327,39 +343,85 @@ app.get('/api/search', async (req, res) => {
 
 app.post('/api/add-song', async (req, res) => {
   const { url, userName } = req.body;
-  
+
   if (!url) {
     return res.status(400).json({ error: 'URL es requerida' });
   }
-  
-  const videoId = extractYouTubeId(url);
+
+  const normalized = normalizeUrl(url);
+  const playlistId = extractPlaylistId(normalized);
+
+  if (playlistId) {
+    const MAX_PLAYLIST_ADD = 100;
+
+    const pl = await YouTube.getPlaylist(normalized, { fetchAll: true, limit: MAX_PLAYLIST_ADD }).catch(() => null);
+    const videos = pl?.videos;
+
+    if (!Array.isArray(videos) || videos.length === 0) {
+      return res.status(400).json({ error: 'No se pudo leer la playlist' });
+    }
+
+    const now = Date.now();
+    const addedAt = new Date().toISOString();
+    const songs = videos
+      .filter((v) => v?.id && v?.title)
+      .slice(0, MAX_PLAYLIST_ADD)
+      .map((v, idx) => ({
+        id: `${now + idx}-${Math.random().toString(36).slice(2, 9)}`,
+        videoId: v.id,
+        title: v.title,
+        thumbnail: normalizeThumb(v.thumbnail, v.id),
+        userName: userName || 'Anónimo',
+        addedAt
+      }));
+
+    if (songs.length === 0) {
+      return res.status(400).json({ error: 'Playlist sin videos válidos' });
+    }
+
+    playlist.push(...songs);
+
+    if (!currentSong) {
+      await playNextSong();
+    }
+
+    io.emit('playlist-updated', {
+      playlist,
+      currentSong,
+      isPlaying,
+      currentTime: isPlaying ? currentTime + (Date.now() - playStartTime) / 1000 : currentTime
+    });
+
+    return res.json({ success: true, addedCount: songs.length, songs });
+  }
+
+  const videoId = extractYouTubeId(normalized);
   if (!videoId) {
     return res.status(400).json({ error: 'URL de YouTube inválida' });
   }
-  
+
   const videoInfo = await getVideoInfo(videoId);
   const song = {
     ...videoInfo,
-    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // ID único (para la cola)
+    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     userName: userName || 'Anónimo',
     addedAt: new Date().toISOString()
   };
-  
+
   playlist.push(song);
 
   if (!currentSong) {
     await playNextSong();
   }
-  
-  // Notificar a todos los clientes
+
   io.emit('playlist-updated', {
     playlist,
     currentSong,
     isPlaying,
     currentTime: isPlaying ? currentTime + (Date.now() - playStartTime) / 1000 : currentTime
   });
-  
-  res.json({ success: true, song });
+
+  res.json({ success: true, addedCount: 1, song });
 });
 
 app.post('/api/next-song', (req, res) => {
