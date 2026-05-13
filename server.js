@@ -47,6 +47,10 @@ let lastSuggestionsSeed = null;
 let lastSuggestions = [];
 let lastSuggestionsAt = 0;
 
+const SUGGESTIONS_TTL_MS = 20000;
+const suggestionsCache = new Map();
+const suggestionsInflight = new Map();
+
 function normalizeThumb(thumbnail, fallbackVideoId) {
   const url = thumbnail?.url || thumbnail?.toJSON?.().url;
   return url || `https://img.youtube.com/vi/${fallbackVideoId}/mqdefault.jpg`;
@@ -119,13 +123,42 @@ function shuffleInPlace(items) {
   return items;
 }
 
-async function computeSuggestions(seedVideoId, count) {
-  const blocked = getBlockedVideoIds(seedVideoId);
+function getSuggestionsKey(seedVideoId, seedTitle) {
+  if (seedVideoId) return `v:${seedVideoId}`;
+  if (seedTitle) return `t:${seedTitle.toLowerCase().slice(0, 80)}`;
+  return 'global';
+}
+
+function getSuggestionBlockedVideoIds(seedVideoId, includeHistory) {
+  const blocked = new Set(includeHistory ? autoplayHistory : []);
+
+  const currentVideoId = getSongVideoId(currentSong);
+  if (currentVideoId) blocked.add(currentVideoId);
+
+  for (const s of playlist) {
+    const vid = getSongVideoId(s);
+    if (vid) blocked.add(vid);
+  }
+
+  if (seedVideoId) blocked.add(seedVideoId);
+
+  return blocked;
+}
+
+async function computeSuggestions(seedVideoId, seedTitle, count) {
+  const strictBlocked = getSuggestionBlockedVideoIds(seedVideoId, true);
+  const relaxedBlocked = getSuggestionBlockedVideoIds(seedVideoId, false);
 
   let candidates = [];
+
   if (seedVideoId) {
-    const fromMix = await getYouTubeMixVideos(seedVideoId, Math.max(count * 10, 60));
-    candidates = candidates.concat(fromMix);
+    const fromMix = await getYouTubeMixVideos(seedVideoId, Math.max(count * 12, 80)).catch(() => []);
+    if (Array.isArray(fromMix) && fromMix.length) candidates = candidates.concat(fromMix);
+  }
+
+  if (seedTitle) {
+    const fromSearch = await YouTube.search(seedTitle, { limit: Math.max(count * 8, 40), type: 'video' }).catch(() => []);
+    if (Array.isArray(fromSearch) && fromSearch.length) candidates = candidates.concat(fromSearch);
   }
 
   const trending = await YouTube.trending({ type: 'MUSIC' }).catch(() => []);
@@ -133,35 +166,70 @@ async function computeSuggestions(seedVideoId, count) {
     candidates = candidates.concat(trending);
   }
 
-  const byId = new Map();
-  for (const v of candidates) {
-    if (!v?.id || !v?.title) continue;
-    if (blocked.has(v.id)) continue;
-    if (!byId.has(v.id)) {
-      byId.set(v.id, {
+  const collect = (blocked, out, used) => {
+    for (const v of candidates) {
+      if (!v?.id || !v?.title) continue;
+      if (blocked.has(v.id)) continue;
+      if (used.has(v.id)) continue;
+
+      used.add(v.id);
+      out.push({
         id: v.id,
         title: v.title,
         channel: v.channel?.name || 'YouTube',
         thumbnail: normalizeThumb(v.thumbnail, v.id)
       });
-    }
-  }
 
-  const unique = Array.from(byId.values());
-  shuffleInPlace(unique);
+      if (out.length >= count) break;
+    }
+  };
 
   const results = [];
-  const start = unique.length ? Math.floor(Date.now() / 15000) % unique.length : 0;
-  for (let i = 0; i < unique.length && results.length < count; i++) {
-    results.push(unique[(start + i) % unique.length]);
+  const used = new Set();
+
+  collect(strictBlocked, results, used);
+  if (results.length < count) {
+    collect(relaxedBlocked, results, used);
   }
 
-  return results;
+  shuffleInPlace(results);
+  return results.slice(0, count);
+}
+
+async function getSuggestions(seedVideoId, seedTitle, count, forceFresh = false) {
+  const key = getSuggestionsKey(seedVideoId, seedTitle);
+  const cached = suggestionsCache.get(key);
+
+  if (!forceFresh && cached && Date.now() - cached.at < SUGGESTIONS_TTL_MS) {
+    return cached.items.slice(0, count);
+  }
+
+  const inflight = suggestionsInflight.get(key);
+  if (inflight) {
+    const items = await inflight.catch(() => cached?.items || []);
+    return (items || []).slice(0, count);
+  }
+
+  const promise = computeSuggestions(seedVideoId, seedTitle, Math.max(count, 6))
+    .then((items) => {
+      suggestionsCache.set(key, { items, at: Date.now() });
+      suggestionsInflight.delete(key);
+      return items;
+    })
+    .catch(() => {
+      suggestionsInflight.delete(key);
+      return cached?.items || [];
+    });
+
+  suggestionsInflight.set(key, promise);
+  const items = await promise;
+  return (items || []).slice(0, count);
 }
 
 async function emitSuggestionsToSocket(socket, count = 6) {
   const seedVideoId = getSongVideoId(currentSong);
-  const items = await computeSuggestions(seedVideoId, count);
+  const seedTitle = currentSong?.title || null;
+  const items = await getSuggestions(seedVideoId, seedTitle, count);
 
   lastSuggestionsSeed = seedVideoId;
   lastSuggestions = items;
@@ -170,9 +238,10 @@ async function emitSuggestionsToSocket(socket, count = 6) {
   socket.emit('suggestions-updated', { seedVideoId, items });
 }
 
-async function broadcastSuggestions(count = 6) {
+async function broadcastSuggestions(count = 6, forceFresh = false) {
   const seedVideoId = getSongVideoId(currentSong);
-  const items = await computeSuggestions(seedVideoId, count);
+  const seedTitle = currentSong?.title || null;
+  const items = await getSuggestions(seedVideoId, seedTitle, count, forceFresh);
 
   lastSuggestionsSeed = seedVideoId;
   lastSuggestions = items;
@@ -223,7 +292,8 @@ app.get('/api/suggestions', async (req, res) => {
   try {
     const count = parseInt(req.query.count) || 6;
     const seedVideoId = getSongVideoId(currentSong);
-    const results = await computeSuggestions(seedVideoId, count);
+    const seedTitle = currentSong?.title || null;
+    const results = await getSuggestions(seedVideoId, seedTitle, count);
     res.json(results);
   } catch (error) {
     console.error('Error fetching suggestions:', error);
@@ -304,7 +374,7 @@ async function playNextSong() {
       if (cacheFresh && lastSuggestionsSeed === seedVideoId && Array.isArray(lastSuggestions) && lastSuggestions.length) {
         suggestionFirst = lastSuggestions[0];
       } else {
-        const computed = await computeSuggestions(seedVideoId, 6).catch(() => []);
+        const computed = await getSuggestions(seedVideoId, currentSong?.title || null, 6, true).catch(() => []);
         if (Array.isArray(computed) && computed.length) {
           suggestionFirst = computed[0];
           lastSuggestionsSeed = seedVideoId;
@@ -350,7 +420,7 @@ async function playNextSong() {
     playlist
   });
 
-  broadcastSuggestions().catch(() => {});
+  broadcastSuggestions(6, true).catch(() => {});
 }
 
 // Socket.io eventos

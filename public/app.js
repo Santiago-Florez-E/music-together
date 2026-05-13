@@ -10,6 +10,7 @@ class MusicTogether {
         this.isPlaying = false;
         this.recommendations = [];
         this.lastSuggestionsSeed = null;
+        this.lastSuggestionsSeedFromServer = null;
         this.suggestionsRefreshTimer = null;
 
         this.initializeElements();
@@ -73,8 +74,11 @@ class MusicTogether {
                 this.suggestionsRefreshTimer = null;
             }
 
-            const items = Array.isArray(data) ? data : (data?.items || []);
+            const payload = Array.isArray(data) ? { seedVideoId: null, items: data } : data;
+            const items = payload?.items || [];
             if (!Array.isArray(items)) return;
+
+            this.lastSuggestionsSeedFromServer = payload?.seedVideoId || null;
 
             this.recommendations = items;
             this.renderRecommendations();
@@ -142,10 +146,17 @@ class MusicTogether {
 
     scheduleRecommendationsRefresh() {
         if (this.suggestionsRefreshTimer) clearTimeout(this.suggestionsRefreshTimer);
+        const expectedSeed = this.lastSuggestionsSeed;
+
         this.suggestionsRefreshTimer = setTimeout(() => {
             this.suggestionsRefreshTimer = null;
+
+            if (this.lastSuggestionsSeedFromServer === expectedSeed) {
+                return;
+            }
+
             this.fetchRecommendations();
-        }, 600);
+        }, 2000);
     }
 
     async fetchRecommendations() {
