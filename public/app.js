@@ -7,9 +7,13 @@ class MusicTogether {
         this.playlist = [];
         this.isPlaying = false;
         
+        this.isPlaying = false;
+        this.recommendations = [];
+
         this.initializeElements();
         this.setupEventListeners();
         this.setupSocketListeners();
+        this.fetchRecommendations();
     }
     
     initializeElements() {
@@ -21,6 +25,8 @@ class MusicTogether {
         this.connectionStatus = document.getElementById('connection-status');
         this.currentSongInfo = document.getElementById('current-song-info');
         this.nextSongBtn = document.getElementById('nextSongBtn');
+        this.recommendationsDiv = document.getElementById('recommendations');
+        this.refreshSuggestionsBtn = document.getElementById('refreshSuggestions');
     }
     
     setupEventListeners() {
@@ -29,15 +35,18 @@ class MusicTogether {
             if (e.key === 'Enter') this.addSong();
         });
         this.nextSongBtn.addEventListener('click', () => this.nextSong());
+        this.refreshSuggestionsBtn.addEventListener('click', () => this.fetchRecommendations());
     }
     
     setupSocketListeners() {
         this.socket.on('connect', () => {
-            this.connectionStatus.textContent = '🟢 Conectado';
+            this.connectionStatus.innerHTML = '🟢 Conectado';
+            this.connectionStatus.style.color = '#10b981';
         });
         
         this.socket.on('disconnect', () => {
-            this.connectionStatus.textContent = '🔴 Desconectado';
+            this.connectionStatus.innerHTML = '🔴 Desconectado';
+            this.connectionStatus.style.color = '#ef4444';
         });
         
         this.socket.on('initial-state', (data) => {
@@ -73,15 +82,18 @@ class MusicTogether {
             return;
         }
         
-        this.playlistDiv.innerHTML = this.playlist.map((song, index) => `
+        this.playlistDiv.innerHTML = this.playlist.map((song) => `
             <div class="song-item">
                 <img src="${song.thumbnail}" alt="Thumbnail" class="song-thumbnail">
                 <div class="song-info">
-                    <div class="song-title">${song.title}</div>
+                    <div class="song-title" title="${song.title}">${song.title}</div>
                     <div class="song-meta">
-                        Añadida por: ${song.userName} • ${new Date(song.addedAt).toLocaleTimeString()}
+                        Por: ${song.userName} • ${new Date(song.addedAt).toLocaleTimeString()}
                     </div>
                 </div>
+                <button class="remove-btn" onclick="app.removeSong('${song.id}')" title="Eliminar de la cola">
+                    ✕
+                </button>
             </div>
         `).join('');
     }
@@ -89,8 +101,9 @@ class MusicTogether {
     updateCurrentSongInfo() {
         if (this.currentSong) {
             this.currentSongInfo.innerHTML = `
-                <strong>Reproduciendo:</strong> ${this.currentSong.title}<br>
-                <small>Añadida por: ${this.currentSong.userName}</small>
+                <div style="color: var(--accent); font-size: 0.8rem; text-transform: uppercase; font-weight: 700; margin-bottom: 4px;">En vivo ahora</div>
+                <div style="font-size: 1.1rem;">${this.currentSong.title}</div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Sugerida por: ${this.currentSong.userName}</div>
             `;
             this.nextSongBtn.style.display = 'inline-block';
         } else {
@@ -98,9 +111,31 @@ class MusicTogether {
             this.nextSongBtn.style.display = 'none';
         }
     }
+
+    async fetchRecommendations() {
+        try {
+            const response = await fetch('/api/suggestions?count=6');
+            this.recommendations = await response.json();
+            this.renderRecommendations();
+        } catch (error) {
+            console.error('Error al cargar sugerencias:', error);
+        }
+    }
+
+    renderRecommendations() {
+        this.recommendationsDiv.innerHTML = this.recommendations.map(rec => `
+            <div class="rec-item" onclick="app.addFromRecommendation('${rec.id}')">
+                <img src="${rec.thumbnail}" class="rec-thumbnail">
+                <div class="rec-info">
+                    <div class="rec-title">${rec.title}</div>
+                    <div class="rec-channel">${rec.channel}</div>
+                </div>
+            </div>
+        `).join('');
+    }
     
-    async addSong() {
-        const url = this.urlInput.value.trim();
+    async addSong(urlValue = null) {
+        const url = urlValue || this.urlInput.value.trim();
         const userName = this.userNameInput.value.trim() || 'Anónimo';
         
         if (!url) {
@@ -120,13 +155,37 @@ class MusicTogether {
             const result = await response.json();
             
             if (result.success) {
-                this.urlInput.value = '';
-                this.showMessage('¡Canción añadida exitosamente!', 'success');
+                if (!urlValue) this.urlInput.value = '';
+                this.showMessage('¡Canción añadida!', 'success');
             } else {
-                this.showMessage(result.error || 'Error al añadir la canción', 'error');
+                this.showMessage(result.error || 'Error al añadir', 'error');
             }
         } catch (error) {
             this.showMessage('Error de conexión', 'error');
+        }
+    }
+
+    addFromRecommendation(id) {
+        const url = `https://www.youtube.com/watch?v=${id}`;
+        this.addSong(url);
+    }
+    
+    async removeSong(songId) {
+        try {
+            const response = await fetch('/api/remove-song', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ id: songId })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                this.showMessage('Canción eliminada', 'success');
+            }
+        } catch (error) {
+            this.showMessage('Error al eliminar', 'error');
         }
     }
     
@@ -140,27 +199,39 @@ class MusicTogether {
     
     showMessage(message, type) {
         const messageDiv = document.createElement('div');
-        messageDiv.className = type;
+        messageDiv.style.position = 'fixed';
+        messageDiv.style.top = '2rem';
+        messageDiv.style.left = '50%';
+        messageDiv.style.transform = 'translateX(-50%)';
+        messageDiv.style.padding = '0.75rem 1.5rem';
+        messageDiv.style.borderRadius = '2rem';
+        messageDiv.style.background = type === 'success' ? '#10b981' : '#ef4444';
+        messageDiv.style.color = 'white';
+        messageDiv.style.fontWeight = '600';
+        messageDiv.style.zIndex = '1000';
+        messageDiv.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+        messageDiv.style.animation = 'fadeIn 0.3s ease';
         messageDiv.textContent = message;
         
-        const container = document.querySelector('.add-song-section');
-        container.appendChild(messageDiv);
+        document.body.appendChild(messageDiv);
         
         setTimeout(() => {
-            messageDiv.remove();
-        }, 3000);
+            messageDiv.style.opacity = '0';
+            messageDiv.style.transition = 'opacity 0.3s ease';
+            setTimeout(() => messageDiv.remove(), 300);
+        }, 2000);
     }
     
-    // YouTube Player API
     onYouTubeIframeAPIReady() {
         this.player = new YT.Player('youtube-player', {
-            height: '315',
-            width: '560',
+            height: '100%',
+            width: '100%',
             playerVars: {
                 'playsinline': 1,
                 'autoplay': 1,
                 'controls': 1,
-                'origin': window.location.origin
+                'origin': window.location.origin,
+                'rel': 0
             },
             events: {
                 'onReady': () => {
@@ -176,7 +247,7 @@ class MusicTogether {
                 },
                 'onError': (event) => {
                     console.error('Error del reproductor de YouTube:', event.data);
-                    this.showMessage('Error al cargar el video. Intentando siguiente...', 'error');
+                    this.showMessage('Error al cargar el video. Saltando...', 'error');
                     setTimeout(() => {
                         this.socket.emit('song-ended');
                     }, 2000);
@@ -191,7 +262,6 @@ class MusicTogether {
                 this.player.loadVideoById(videoId);
             } catch (error) {
                 console.error('Error al cargar video:', error);
-                this.showMessage('Error al cargar el video', 'error');
             }
         }
     }
