@@ -13,6 +13,9 @@ class MusicTogether {
         this.lastSuggestionsSeedFromServer = null;
         this.suggestionsRefreshTimer = null;
 
+        this.activeTab = 'queue';
+        this.searchResults = [];
+
         this.initializeElements();
         this.setupEventListeners();
         this.setupSocketListeners();
@@ -30,6 +33,15 @@ class MusicTogether {
         this.nextSongBtn = document.getElementById('nextSongBtn');
         this.recommendationsDiv = document.getElementById('recommendations');
         this.refreshSuggestionsBtn = document.getElementById('refreshSuggestions');
+
+        this.tabQueueBtn = document.getElementById('tabQueueBtn');
+        this.tabSearchBtn = document.getElementById('tabSearchBtn');
+        this.tabQueuePanel = document.getElementById('tab-queue');
+        this.tabSearchPanel = document.getElementById('tab-search');
+
+        this.searchQueryInput = document.getElementById('searchQuery');
+        this.searchBtn = document.getElementById('searchBtn');
+        this.searchResultsDiv = document.getElementById('searchResults');
     }
     
     setupEventListeners() {
@@ -39,6 +51,14 @@ class MusicTogether {
         });
         this.nextSongBtn.addEventListener('click', () => this.nextSong());
         this.refreshSuggestionsBtn.addEventListener('click', () => this.fetchRecommendations());
+
+        this.tabQueueBtn?.addEventListener('click', () => this.switchTab('queue'));
+        this.tabSearchBtn?.addEventListener('click', () => this.switchTab('search'));
+
+        this.searchBtn?.addEventListener('click', () => this.searchYouTube());
+        this.searchQueryInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.searchYouTube();
+        });
     }
     
     setupSocketListeners() {
@@ -177,6 +197,56 @@ class MusicTogether {
                     <div class="rec-title">${rec.title}</div>
                     <div class="rec-channel">${rec.channel}</div>
                 </div>
+            </div>
+        `).join('');
+    }
+
+    switchTab(tab) {
+        this.activeTab = tab;
+
+        if (this.tabQueueBtn) this.tabQueueBtn.classList.toggle('active', tab === 'queue');
+        if (this.tabSearchBtn) this.tabSearchBtn.classList.toggle('active', tab === 'search');
+
+        if (this.tabQueuePanel) this.tabQueuePanel.classList.toggle('hidden', tab !== 'queue');
+        if (this.tabSearchPanel) this.tabSearchPanel.classList.toggle('hidden', tab !== 'search');
+
+        if (tab === 'search' && (!this.searchResults || this.searchResults.length === 0)) {
+            this.searchResultsDiv.innerHTML = '<p class="empty-search">Escribe algo y pulsa Buscar</p>';
+        }
+    }
+
+    async searchYouTube() {
+        const q = this.searchQueryInput?.value?.trim() || '';
+        if (!q) {
+            this.showMessage('Escribe algo para buscar', 'error');
+            return;
+        }
+
+        try {
+            this.searchResultsDiv.innerHTML = '<p class="empty-search">Buscando...</p>';
+            const response = await fetch(`/api/search?q=${encodeURIComponent(q)}&count=12`);
+            const results = await response.json();
+            this.searchResults = Array.isArray(results) ? results : [];
+            this.renderSearchResults();
+        } catch (error) {
+            this.searchResultsDiv.innerHTML = '<p class="empty-search">No se pudo buscar. Intenta otra vez.</p>';
+        }
+    }
+
+    renderSearchResults() {
+        if (!this.searchResults || this.searchResults.length === 0) {
+            this.searchResultsDiv.innerHTML = '<p class="empty-search">Sin resultados</p>';
+            return;
+        }
+
+        this.searchResultsDiv.innerHTML = this.searchResults.map((v) => `
+            <div class="search-item">
+                <img src="${v.thumbnail}" alt="Thumbnail" class="search-thumbnail">
+                <div class="search-info">
+                    <div class="search-title" title="${v.title}">${v.title}</div>
+                    <div class="search-meta">${v.channel || 'YouTube'}</div>
+                </div>
+                <button class="search-add-btn" onclick="app.addFromRecommendation('${v.id}')">Añadir</button>
             </div>
         `).join('');
     }

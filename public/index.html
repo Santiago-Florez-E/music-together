@@ -14,25 +14,8 @@
       </header>
 
       <div class="app-layout">
-        <!-- Main Content: Player and Queue -->
+        <!-- Main Content: Player and Tabs -->
         <main class="main-content">
-          <section class="card add-song-section">
-            <div class="input-group">
-              <input
-                type="text"
-                id="userName"
-                placeholder="Tu nombre"
-                maxlength="20"
-              />
-              <input
-                type="url"
-                id="youtubeUrl"
-                placeholder="Pega un enlace de YouTube aquí..."
-              />
-              <button id="addSongBtn">Añadir a la cola</button>
-            </div>
-          </section>
-
           <section class="card player-section">
             <div id="player-container">
               <div id="youtube-player"></div>
@@ -47,17 +30,57 @@
             </div>
           </section>
 
-          <section class="card playlist-section">
-            <h3>
-              Cola de Reproducción
-              <span class="queue-badge" id="queue-count">0</span>
-            </h3>
-            <div id="playlist" class="playlist">
-              <p class="empty-playlist">
-                La lista está vacía. ¡Añade la primera canción!
-              </p>
-            </div>
-          </section>
+          <div class="tabs">
+            <button class="tab-btn active" id="tabQueueBtn" data-tab="queue">Cola</button>
+            <button class="tab-btn" id="tabSearchBtn" data-tab="search">Buscar</button>
+          </div>
+
+          <div class="tab-panel" id="tab-queue">
+            <section class="card add-song-section">
+              <div class="input-group">
+                <input
+                  type="text"
+                  id="userName"
+                  placeholder="Tu nombre"
+                  maxlength="20"
+                />
+                <input
+                  type="url"
+                  id="youtubeUrl"
+                  placeholder="Pega un enlace de YouTube aquí..."
+                />
+                <button id="addSongBtn">Añadir a la cola</button>
+              </div>
+            </section>
+
+            <section class="card playlist-section">
+              <h3>
+                Cola de Reproducción
+                <span class="queue-badge" id="queue-count">0</span>
+              </h3>
+              <div id="playlist" class="playlist">
+                <p class="empty-playlist">
+                  La lista está vacía. ¡Añade la primera canción!
+                </p>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel hidden" id="tab-search">
+            <section class="card search-section">
+              <div class="search-bar">
+                <input
+                  type="text"
+                  id="searchQuery"
+                  placeholder="Busca una canción o artista en YouTube..."
+                />
+                <button id="searchBtn">Buscar</button>
+              </div>
+              <div id="searchResults" class="search-results">
+                <p class="empty-search">Escribe algo y pulsa Buscar</p>
+              </div>
+            </section>
+          </div>
         </main>
 
         <!-- Sidebar: Recommended Songs -->

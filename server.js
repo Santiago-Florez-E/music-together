@@ -301,6 +301,30 @@ app.get('/api/suggestions', async (req, res) => {
   }
 });
 
+app.get('/api/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().trim();
+    if (!q) return res.json([]);
+
+    const count = Math.min(25, Math.max(1, parseInt(req.query.count) || 12));
+    const results = await YouTube.search(q, { limit: count, type: 'video' }).catch(() => []);
+
+    const mapped = (Array.isArray(results) ? results : [])
+      .filter((v) => v?.id && v?.title)
+      .map((v) => ({
+        id: v.id,
+        title: v.title,
+        channel: v.channel?.name || 'YouTube',
+        thumbnail: normalizeThumb(v.thumbnail, v.id)
+      }));
+
+    res.json(mapped);
+  } catch (error) {
+    console.error('Error searching:', error);
+    res.json([]);
+  }
+});
+
 app.post('/api/add-song', async (req, res) => {
   const { url, userName } = req.body;
   
