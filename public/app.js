@@ -17,6 +17,7 @@ class MusicTogether {
         this.searchResults = [];
         this.history = [];
         this.activeScreenMessages = [];
+        this.chatMessages = [];
 
         this.initializeElements();
         this.setupEventListeners();
@@ -51,6 +52,8 @@ class MusicTogether {
         this.screenMessageInput = document.getElementById('screenMessage');
         this.sendMessageBtn = document.getElementById('sendMessageBtn');
         this.playerContainer = document.getElementById('player-container');
+
+        this.chatMessagesDiv = document.getElementById('chatMessages');
     }
     
     setupEventListeners() {
@@ -59,7 +62,7 @@ class MusicTogether {
             if (e.key === 'Enter') this.addSong();
         });
         this.nextSongBtn.addEventListener('click', () => this.nextSong());
-        this.refreshSuggestionsBtn.addEventListener('click', () => this.fetchRecommendations());
+        this.refreshSuggestionsBtn.addEventListener('click', () => this.fetchRecommendations({ force: true }));
 
         this.tabQueueBtn?.addEventListener('click', () => this.switchTab('queue'));
         this.tabSearchBtn?.addEventListener('click', () => this.switchTab('search'));
@@ -137,6 +140,19 @@ class MusicTogether {
             if (!text) return;
             this.renderScreenMessage({ text, userName });
         });
+
+        this.socket.on('chat-history', (data) => {
+            const items = data?.items || [];
+            if (!Array.isArray(items)) return;
+            this.chatMessages = items;
+            this.renderChat();
+        });
+
+        this.socket.on('chat-message', (msg) => {
+            if (!msg?.text) return;
+            this.chatMessages = [...(this.chatMessages || []), msg].slice(-200);
+            this.renderChat({ scrollToBottom: true });
+        });
     }
     
     updateState(data) {
@@ -213,9 +229,14 @@ class MusicTogether {
         }, 2000);
     }
 
-    async fetchRecommendations() {
+    async fetchRecommendations(options = {}) {
         try {
-            const response = await fetch('/api/suggestions?count=6');
+            const force = Boolean(options.force);
+            const url = force
+                ? `/api/suggestions?count=6&fresh=1&_ts=${Date.now()}`
+                : `/api/suggestions?count=6&_ts=${Date.now()}`;
+
+            const response = await fetch(url);
             this.recommendations = await response.json();
             this.renderRecommendations();
         } catch (error) {
@@ -267,6 +288,49 @@ class MusicTogether {
         });
 
         if (this.screenMessageInput) this.screenMessageInput.value = '';
+    }
+
+    renderChat(options = {}) {
+        if (!this.chatMessagesDiv) return;
+
+        const items = Array.isArray(this.chatMessages) ? this.chatMessages : [];
+
+        if (items.length === 0) {
+            this.chatMessagesDiv.innerHTML = '<p class="empty-search">Aún no hay mensajes</p>';
+            return;
+        }
+
+        this.chatMessagesDiv.innerHTML = items.map((m) => {
+            const user = (m.userName || 'Anónimo').toString();
+            const when = m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : '';
+            const text = (m.text || '').toString();
+            const safeText = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+            const safeUser = user
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+
+            return `
+                <div class="chat-message">
+                    <div class="chat-meta">
+                        <span>${safeUser}</span>
+                        <span>${when}</span>
+                    </div>
+                    <div class="chat-text">${safeText}</div>
+                </div>
+            `;
+        }).join('');
+
+        if (options.scrollToBottom) {
+            this.chatMessagesDiv.scrollTop = this.chatMessagesDiv.scrollHeight;
+        }
     }
 
     renderScreenMessage({ text, userName }) {

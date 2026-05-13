@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Music Together - Premium Shared Playlist</title>
+    <link rel="icon" href="/storage/img/icono.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/storage/img/icono.png" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -103,31 +105,40 @@
           </div>
         </main>
 
-        <!-- Sidebar: Recommended Songs -->
-        <aside class="card sidebar">
-          <div
-            style="
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              margin-bottom: 1.5rem;
-            "
-          >
-            <h3 style="margin: 0">Sugerencias</h3>
-            <button
-              id="refreshSuggestions"
+        <!-- Sidebar: Recommended Songs + Chat -->
+        <aside class="sidebar-stack">
+          <section class="card sidebar">
+            <div
               style="
-                padding: 0.4rem 0.8rem;
-                font-size: 0.8rem;
-                background: rgba(255, 255, 255, 0.1);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1.5rem;
               "
             >
-              ↻ Refrescar
-            </button>
-          </div>
-          <div id="recommendations" class="recommendation-list">
-            <!-- Recommended items will be injected here -->
-          </div>
+              <h3 style="margin: 0">Sugerencias</h3>
+              <button
+                id="refreshSuggestions"
+                style="
+                  padding: 0.4rem 0.8rem;
+                  font-size: 0.8rem;
+                  background: rgba(255, 255, 255, 0.1);
+                "
+              >
+                ↻ Refrescar
+              </button>
+            </div>
+            <div id="recommendations" class="recommendation-list">
+              <!-- Recommended items will be injected here -->
+            </div>
+          </section>
+
+          <section class="card chat">
+            <h3 style="margin-bottom: 1rem">Chat</h3>
+            <div id="chatMessages" class="chat-messages">
+              <p class="empty-search">Aún no hay mensajes</p>
+            </div>
+          </section>
         </aside>
       </div>
     </div>

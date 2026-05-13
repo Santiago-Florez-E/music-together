@@ -289,8 +289,55 @@ button:hover {
 }
 
 /* Recommended Sidebar */
+.sidebar-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
 .sidebar {
     height: fit-content;
+}
+
+.chat {
+    height: fit-content;
+}
+
+.chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-height: 420px;
+    overflow: auto;
+    padding-right: 0.25rem;
+}
+
+.chat-message {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+}
+
+.chat-message:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--glass-border);
+}
+
+.chat-meta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.chat-text {
+    font-weight: 500;
+    word-break: break-word;
 }
 
 .sidebar h3 {

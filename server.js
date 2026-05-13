@@ -32,6 +32,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/storage', express.static(path.join(__dirname, 'storage')));
 
 // Estado global de la aplicación
 let playlist = [];
@@ -53,6 +54,18 @@ const suggestionsInflight = new Map();
 
 let playHistory = [];
 const PLAY_HISTORY_MAX = 50;
+
+let chatHistory = [];
+const CHAT_HISTORY_MAX = 200;
+
+function addToChatHistory(entry) {
+  if (!entry?.text) return;
+  chatHistory = [entry, ...chatHistory].slice(0, CHAT_HISTORY_MAX);
+}
+
+async function emitChatToSocket(socket, count = 100) {
+  socket.emit('chat-history', { items: chatHistory.slice(0, count).reverse() });
+}
 
 function normalizeThumb(thumbnail, fallbackVideoId) {
   const url = thumbnail?.url || thumbnail?.toJSON?.().url;
@@ -339,7 +352,8 @@ app.get('/api/suggestions', async (req, res) => {
     const count = parseInt(req.query.count) || 6;
     const seedVideoId = getSongVideoId(currentSong);
     const seedTitle = currentSong?.title || null;
-    const results = await getSuggestions(seedVideoId, seedTitle, count);
+    const fresh = req.query.fresh === '1' || req.query.fresh === 'true';
+    const results = await getSuggestions(seedVideoId, seedTitle, count, fresh);
     res.json(results);
   } catch (error) {
     console.error('Error fetching suggestions:', error);
@@ -624,6 +638,8 @@ io.on('connection', (socket) => {
     playNextSong();
   });
 
+  emitChatToSocket(socket).catch(() => {});
+
   socket.on('screen-message', (payload) => {
     const text = (payload?.text || '').toString().trim();
     const userName = (payload?.userName || 'Anónimo').toString().trim().slice(0, 20) || 'Anónimo';
@@ -631,11 +647,17 @@ io.on('connection', (socket) => {
     if (!text) return;
     if (text.length > 140) return;
 
-    io.emit('screen-message', {
+    const msg = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       text,
       userName,
       createdAt: Date.now()
-    });
+    };
+
+    addToChatHistory(msg);
+
+    io.emit('chat-message', msg);
+    io.emit('screen-message', msg);
   });
   
   socket.on('disconnect', () => {
