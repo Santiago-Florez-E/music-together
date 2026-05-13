@@ -1,52 +1,101 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Music Together - Lista Compartida</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music Together - Premium Shared Playlist</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
     <div class="container">
-        <header>
-            <h1>🎵 Music Together</h1>
-            <p>Lista de reproducción compartida</p>
-        </header>
+      <header>
+        <h1>🎵 Music Together</h1>
+        <p>Sincroniza tu música con amigos en tiempo real</p>
+      </header>
 
-        <div class="add-song-section">
+      <div class="app-layout">
+        <!-- Main Content: Player and Queue -->
+        <main class="main-content">
+          <section class="card add-song-section">
             <div class="input-group">
-                <input type="text" id="userName" placeholder="Tu nombre (opcional)" maxlength="20">
-                <input type="url" id="youtubeUrl" placeholder="Pega aquí el enlace de YouTube">
-                <button id="addSongBtn">Añadir</button>
+              <input
+                type="text"
+                id="userName"
+                placeholder="Tu nombre"
+                maxlength="20"
+              />
+              <input
+                type="url"
+                id="youtubeUrl"
+                placeholder="Pega un enlace de YouTube aquí..."
+              />
+              <button id="addSongBtn">Añadir a la cola</button>
             </div>
-        </div>
+          </section>
 
-        <div class="player-section">
+          <section class="card player-section">
             <div id="player-container">
-                <div id="youtube-player"></div>
+              <div id="youtube-player"></div>
             </div>
             <div class="player-controls">
-                <div id="current-song-info">
-                    <span id="no-song">No hay canciones en reproducción</span>
-                </div>
-                <button id="nextSongBtn" style="display: none;">Siguiente Canción</button>
+              <div id="current-song-info">
+                <span id="no-song">Nada sonando ahora mismo</span>
+              </div>
+              <button id="nextSongBtn" style="display: none">
+                Siguiente →
+              </button>
             </div>
-        </div>
+          </section>
 
-        <div class="playlist-section">
-            <h3>Cola de Reproducción (<span id="queue-count">0</span>)</h3>
+          <section class="card playlist-section">
+            <h3>
+              Cola de Reproducción
+              <span class="queue-badge" id="queue-count">0</span>
+            </h3>
             <div id="playlist" class="playlist">
-                <p class="empty-playlist">La lista está vacía. ¡Añade la primera canción!</p>
+              <p class="empty-playlist">
+                La lista está vacía. ¡Añade la primera canción!
+              </p>
             </div>
-        </div>
+          </section>
+        </main>
 
-        <div class="status">
-            <span id="connection-status">🔴 Desconectado</span>
-        </div>
+        <!-- Sidebar: Recommended Songs -->
+        <aside class="card sidebar">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 1.5rem;
+            "
+          >
+            <h3 style="margin: 0">Sugerencias</h3>
+            <button
+              id="refreshSuggestions"
+              style="
+                padding: 0.4rem 0.8rem;
+                font-size: 0.8rem;
+                background: rgba(255, 255, 255, 0.1);
+              "
+            >
+              ↻ Refrescar
+            </button>
+          </div>
+          <div id="recommendations" class="recommendation-list">
+            <!-- Recommended items will be injected here -->
+          </div>
+        </aside>
+      </div>
     </div>
 
+    <div id="connection-status" class="connection-pill">⚪ Conectando...</div>
+
+    <!-- Socket.io client -->
     <script src="/socket.io/socket.io.js"></script>
-    <script src="https://www.youtube.com/iframe_api"></script>
+    <!-- App Logic -->
     <script src="app.js"></script>
-</body>
+    <!-- YouTube IFrame Player API (Must be last) -->
+    <script src="https://www.youtube.com/iframe_api"></script>
+  </body>
 </html>
